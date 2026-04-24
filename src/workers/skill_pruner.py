@@ -25,6 +25,7 @@ class SkillPruner(BaseWorker):
         Args:
             config: The newly loaded LibrarianConfig.
         """
+        self._expiry_days = config.workers.skill_pruner.get("expiry_days") or self.DEFAULT_EXPIRY_DAYS
         self._config_pending = True
 
     def _on_initialize(self, config: LibrarianConfig) -> None:
@@ -48,7 +49,6 @@ class SkillPruner(BaseWorker):
 
         all_skills = db.get_all_skills()
         now = datetime.now(timezone.utc)
-        expiry_days = state.get("expiry_days", self.DEFAULT_EXPIRY_DAYS)
         expired: list[str] = []
 
         for skill in all_skills:
@@ -57,7 +57,7 @@ class SkillPruner(BaseWorker):
                 continue
             try:
                 last_use_dt = datetime.fromisoformat(last_use)
-                if (now - last_use_dt).days > expiry_days:
+                if (now - last_use_dt).days > self._expiry_days:
                     expired.append(skill["skill_name"])
             except (ValueError, TypeError):
                 continue

@@ -1,12 +1,12 @@
+common_llm_config: &common_llm_config
+  apiKey: API_KEY
+  apiBase: API_BASE
+
 llms:
   - name: llm-1
-    model: <MODEL>
-    apiKey: <API_KEY>
-    apiBase: <API_BASE>
+    <<: *common_llm_config
   - name: llm-2
-    model: <MODEL>
-    apiKey: <API_KEY>
-    apiBase: <API_BASE>
+    <<: *common_llm_config
 
 workers:
   ConfigLoader:
@@ -22,7 +22,6 @@ workers:
       - access_network
       - web_scraping
       - file_management
-      - other
   SkillDeduplicator:
     llm: llm-1
   SkillSplitter:
@@ -30,7 +29,8 @@ workers:
     splitRule:
       maxLines: 1000
       minLines: 100
-  SkillPruner: {}
+  SkillPruner:
+    expiryDays: 7 # Number of days to keep skills before pruning them. Defaults to 90 days.
   SkillLinkMaintainer:
     llm: llm-1
   ToolSynthesizer:
