@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import threading
 from pathlib import Path
 from typing import Optional
 from unittest.mock import MagicMock, patch
@@ -644,7 +643,7 @@ class TestConfigLoaderCallbacks:
 
 
 class TestConfigLoaderHotReload:
-    """Tests for ConfigLoader hot-reload detection via mtime polling."""
+    """Tests for ConfigLoader hot-reload via watchdog file change handling."""
 
     @pytest.fixture()
     def loader_with_config(self, tmp_path: Path) -> ConfigLoader:
@@ -654,47 +653,33 @@ class TestConfigLoaderHotReload:
         loader.load()
         return loader
 
-    def test_check_for_changes_detects_mtime_change(self, loader_with_config: ConfigLoader) -> None:
+    def test_handle_file_change_triggers_callbacks(self, loader_with_config: ConfigLoader) -> None:
         callback = MagicMock()
         loader_with_config.on_change(callback)
-        loader_with_config._last_mtime = 0.0
-        loader_with_config._check_for_changes()
+        loader_with_config._handle_file_change()
         callback.assert_called_once()
         new_config = callback.call_args[0][0]
         assert isinstance(new_config, LibrarianConfig)
 
-    def test_check_for_changes_no_change(self, loader_with_config: ConfigLoader) -> None:
+    def test_handle_file_change_reload_failure_no_callback(self, loader_with_config: ConfigLoader) -> None:
         callback = MagicMock()
         loader_with_config.on_change(callback)
-        current_mtime = loader_with_config.config_path.stat().st_mtime
-        loader_with_config._last_mtime = current_mtime
-        loader_with_config._check_for_changes()
-        callback.assert_not_called()
-
-    def test_check_for_changes_file_deleted(self, loader_with_config: ConfigLoader) -> None:
-        loader_with_config.config_path.unlink()
-        loader_with_config._check_for_changes()
-
-    def test_check_for_changes_reload_failure_keeps_old(self, loader_with_config: ConfigLoader) -> None:
-        callback = MagicMock()
-        loader_with_config.on_change(callback)
-        loader_with_config._last_mtime = 0.0
         loader_with_config.config_path.write_text("invalid: {yaml: [", encoding="utf-8")
-        loader_with_config._check_for_changes()
+        loader_with_config._handle_file_change()
         callback.assert_not_called()
 
-    def test_start_watching_creates_thread(self, loader_with_config: ConfigLoader) -> None:
+    def test_start_watching_creates_observer(self, loader_with_config: ConfigLoader) -> None:
         loader_with_config.start_watching()
         try:
-            assert loader_with_config._watcher_thread is not None
-            assert loader_with_config._watcher_thread.is_alive()
+            assert loader_with_config._observer is not None
+            assert loader_with_config._observer.is_alive()
         finally:
             loader_with_config.stop_watching()
 
-    def test_stop_watching_stops_thread(self, loader_with_config: ConfigLoader) -> None:
+    def test_stop_watching_stops_observer(self, loader_with_config: ConfigLoader) -> None:
         loader_with_config.start_watching()
         loader_with_config.stop_watching()
-        assert loader_with_config._watcher_thread is None
+        assert loader_with_config._observer is None
 
     def test_double_start_watching_raises(self, loader_with_config: ConfigLoader) -> None:
         loader_with_config.start_watching()

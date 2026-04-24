@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
-import threading
 from pathlib import Path
 from typing import Any, Callable
 
 import yaml
 from dotenv import load_dotenv
+from watchdog.events import FileSystemEventHandler, FileModifiedEvent
+from watchdog.observers import Observer
 
 from src.config.schema import LibrarianConfig
 
@@ -46,18 +46,34 @@ def _convert_keys(data: Any) -> Any:
     return data
 
 
+class _ConfigFileHandler(FileSystemEventHandler):
+    """watchdog event handler that triggers config reload on file modification."""
+
+    def __init__(self, loader: ConfigLoader) -> None:
+        self._loader = loader
+
+    def on_modified(self, event: FileModifiedEvent) -> None:
+        if event.is_directory:
+            return
+        try:
+            if Path(event.src_path).resolve() == self._loader.config_path.resolve():
+                self._loader._handle_file_change(self._loader.config_path)
+            if Path(event.src_path).resolve() == self._loader.env_path.resolve():
+                self._loader._handle_file_change(self._loader.env_path)
+        except Exception:
+            logger.exception("Error handling config file change event")
+
+
 class ConfigLoader:
     """Loads, validates, and hot-reloads the librarian.yaml configuration.
 
-    Watches the config file for changes using modification-time polling
-    and notifies registered callbacks when the configuration is updated.
+    Watches the config file for changes using watchdog (OS-level file system
+    events) and notifies registered callbacks when the configuration is updated.
 
     Attributes:
         config_path: Path to the librarian.yaml file.
         env_path: Path to the .env file for LLM credential defaults.
     """
-
-    _POLL_INTERVAL: float = 5.0
 
     def __init__(self, config_path: str | Path = "librarian.yaml", env_path: str | Path | None = None) -> None:
         """Initialize the ConfigLoader.
@@ -70,10 +86,8 @@ class ConfigLoader:
         self.config_path = Path(config_path)
         self.env_path = Path(env_path) if env_path else self.config_path.parent / ".env"
         self._config: LibrarianConfig | None = None
-        self._last_mtime: float = 0.0
         self._callbacks: list[ConfigCallback] = []
-        self._watcher_thread: threading.Thread | None = None
-        self._stop_event = threading.Event()
+        self._observer: Observer | None = None
 
     def load(self) -> LibrarianConfig:
         """Load and validate the configuration from the YAML file.
@@ -89,12 +103,10 @@ class ConfigLoader:
             yaml.YAMLError: If the YAML is malformed.
         """
         if self.env_path.exists():
-            load_dotenv(self.env_path)
-
+            load_dotenv(self.env_path, override=True)
         raw = self._read_yaml()
         converted = _convert_keys(raw)
         self._config = LibrarianConfig.model_validate(converted)
-        self._last_mtime = self.config_path.stat().st_mtime
         logger.info("Configuration loaded from %s", self.config_path)
         return self._config
 
@@ -133,36 +145,33 @@ class ConfigLoader:
         return unsubscribe
 
     def start_watching(self) -> None:
-        """Start watching the config file for changes in a background thread.
+        """Start watching the config file for changes.
 
-        Polls the file modification time every 5 seconds. When a change is
-        detected, the config is reloaded and all registered callbacks are
-        notified.
-
-        Raises:
-            RuntimeError: If watching is already in progress.
+        Returns:
+            None
         """
-        if self._watcher_thread is not None and self._watcher_thread.is_alive():
+
+        if self._observer is not None and self._observer.is_alive():
             raise RuntimeError("Config watcher is already running.")
 
-        self._stop_event.clear()
-        self._watcher_thread = threading.Thread(
-            target=self._watch_loop,
-            name="config-watcher",
-            daemon=True,
-        )
-        self._watcher_thread.start()
-        logger.info("Started watching %s for changes", self.config_path)
+        handler = _ConfigFileHandler(self)
+        self._observer = Observer()
+        self._observer.schedule(handler, str(self.config_path.parent.resolve()), recursive=False)
+        self._observer.schedule(handler, str(self.env_path.parent.resolve()), recursive=False)
+        self._observer.daemon = True
+        self._observer.start()
+        logger.info("Started watching %s for changes (watchdog)", self.config_path)
 
     def stop_watching(self) -> None:
-        """Stop the background config file watcher.
+        """Stop watching the config file for changes.
 
-        Blocks until the watcher thread has fully stopped.
+        Returns:
+            None
         """
-        self._stop_event.set()
-        if self._watcher_thread is not None:
-            self._watcher_thread.join(timeout=self._POLL_INTERVAL + 1.0)
-            self._watcher_thread = None
+        if self._observer is not None:
+            self._observer.stop()
+            self._observer.join(timeout=5.0)
+            self._observer = None
         logger.info("Stopped watching %s", self.config_path)
 
     def _read_yaml(self) -> dict[str, Any]:
@@ -180,40 +189,17 @@ class ConfigLoader:
             data = yaml.safe_load(f)
         return data if isinstance(data, dict) else {}
 
-    def _watch_loop(self) -> None:
-        """Background loop that polls for config file changes.
+    def _handle_file_change(self, file_path: Path) -> None:
+        """Handle a file change event by reloading the config.
 
-        Checks the file modification time at regular intervals and triggers
-        a reload when a change is detected.
+        Returns:
+            None
         """
-        while not self._stop_event.is_set():
-            self._stop_event.wait(timeout=self._POLL_INTERVAL)
-            if self._stop_event.is_set():
-                break
-            try:
-                self._check_for_changes()
-            except Exception:
-                logger.exception("Error checking for config changes")
-
-    def _check_for_changes(self) -> None:
-        """Check if the config file has been modified and reload if so.
-
-        Notifies all registered callbacks with the new configuration when
-        a change is detected.
-        """
-        if not self.config_path.exists():
-            return
-
-        current_mtime = self.config_path.stat().st_mtime
-        if current_mtime == self._last_mtime:
-            return
-
-        logger.info("Config change detected (mtime: %s -> %s)", self._last_mtime, current_mtime)
+        logger.info("Config change detected for %s", file_path)
         try:
             new_config = self.load()
         except Exception:
             logger.exception("Failed to reload config; keeping previous version")
-            self._last_mtime = current_mtime
             return
 
         for callback in self._callbacks:

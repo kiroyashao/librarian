@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
+from src import VERSION
 from src.config.loader import ConfigLoader
 from src.config.schema import LibrarianConfig
 from src.db.manager import DatabaseManager
@@ -67,7 +68,7 @@ def create_app(
     Returns:
         A configured FastAPI application.
     """
-    app = FastAPI(title="Librarian Skills Manager", version="0.1.0")
+    app = FastAPI(title="Librarian Skills Manager", version=f"{VERSION}")
 
     _pending_skills: list[dict[str, Any]] = []
 
@@ -93,7 +94,7 @@ def create_app(
             "content": request.content,
         })
 
-        if len(_pending_skills) >= config.skill_trigger_threshold:
+        if len(_pending_skills) >= config_loader.get_config().skill_trigger_threshold:
             _trigger_case1()
 
         return result
@@ -150,7 +151,11 @@ def create_app(
     @app.get("/config")
     def get_config() -> dict[str, Any]:
         """Get current configuration."""
-        return config.model_dump(mode="json")
+        current_config = config_loader.get_config()
+        config_dict = current_config.model_dump(mode="json")
+        for llm in config_dict.get("llms", []):
+            llm.pop("api_key", None)
+        return config_dict
 
     @app.get("/tools")
     def get_tools() -> list[dict[str, Any]]:

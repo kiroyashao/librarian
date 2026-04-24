@@ -27,11 +27,16 @@ class LLMConfig(BaseModel):
         Returns:
             A new LLMConfig with env var defaults applied for any missing fields.
         """
+        model= os.getenv(self.name) or os.getenv("MODEL")
+        api_key=os.getenv(self.api_key) or os.getenv("API_KEY", "xyz")
+        api_base=os.getenv(self.api_base) or os.getenv("API_BASE")
+        if not model:
+            raise ValueError("model is required")
         return LLMConfig(
             name=self.name,
-            model=self.model or os.getenv("MODEL"),
-            api_key=self.api_key or os.getenv("API_KEY"),
-            api_base=self.api_base or os.getenv("API_BASE"),
+            model=model,
+            api_key=api_key,
+            api_base=api_base,
         )
 
 
@@ -97,6 +102,16 @@ class SkillSplitterConfig(WorkerConfigBase):
     split_rule: SplitRule = Field(default_factory=SplitRule)
 
 
+class SkillPrunerConfig(BaseModel):
+    """Configuration for the SkillPruner worker.
+
+    Attributes:
+        expiry_days: Number of days to keep skills before pruning them. Defaults to 90 days.
+    """
+
+    expiry_days: int = Field(default=90, gt=0)
+
+
 class ToolGuardianConfig(WorkerConfigBase):
     """Configuration for the ToolGuardian worker.
 
@@ -127,7 +142,7 @@ class WorkersConfig(BaseModel):
     skill_evaluator: SkillEvaluatorConfig = Field(default_factory=SkillEvaluatorConfig)
     skill_deduplicator: WorkerConfigBase = Field(default_factory=WorkerConfigBase)
     skill_splitter: SkillSplitterConfig = Field(default_factory=SkillSplitterConfig)
-    skill_pruner: WorkerConfigBase = Field(default_factory=WorkerConfigBase)
+    skill_pruner: SkillPrunerConfig = Field(default_factory=SkillPrunerConfig)
     skill_link_maintainer: WorkerConfigBase = Field(default_factory=WorkerConfigBase)
     tool_synthesizer: WorkerConfigBase = Field(default_factory=WorkerConfigBase)
     tool_guardian: ToolGuardianConfig = Field(default_factory=ToolGuardianConfig)
