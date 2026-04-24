@@ -1,0 +1,5 @@
+.trae/
+.env
+.tmp/
+.pytest_cache/
+*.pyc

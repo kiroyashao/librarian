@@ -1,0 +1,62 @@
+llms:
+  - name: llm-1
+    model: <MODEL>
+    apiKey: <API_KEY>
+    apiBase: <API_BASE>
+  - name: llm-2
+    model: <MODEL>
+    apiKey: <API_KEY>
+    apiBase: <API_BASE>
+
+workers:
+  ConfigLoader:
+    llm: llm-1
+  SkillRouter:
+    llm: llm-1
+  SkillEvaluator:
+    llm: llm-2
+    qualityThreshold: 0.7
+    requireHumanReview: false
+    categories:
+      - data_analysis
+      - access_network
+      - web_scraping
+      - file_management
+      - other
+  SkillDeduplicator:
+    llm: llm-1
+  SkillSplitter:
+    llm: llm-2
+    splitRule:
+      maxLines: 1000
+      minLines: 100
+  SkillPruner: {}
+  SkillLinkMaintainer:
+    llm: llm-1
+  ToolSynthesizer:
+    llm: llm-2
+  ToolGuardian:
+    llm: llm-1
+    requireHumanReview: true
+
+cronjobs:
+  enabled: true
+  jobs:
+    cleaner:
+      schedule: "0 0 */3 * *"
+    merger:
+      schedule: "0 0 */3 * *"
+
+skillTriggerThreshold: 10
+maxRejectionCount: 3
+
+api:
+  port: 9112
+  host: "0.0.0.0"
+
+database:
+  path: "./data/librarian.db"
+
+logging:
+  level: "INFO"
+  file: "./logs/librarian.log"
