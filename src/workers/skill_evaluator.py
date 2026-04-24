@@ -24,10 +24,10 @@ class SkillEvaluator(BaseWorker):
         Args:
             config: The newly loaded LibrarianConfig.
         """
-        self._llm_config_name = config.workers.skill_evaluator.llm
-        self._quality_threshold = config.workers.skill_evaluator.quality_threshold
-        self._require_human_review = config.workers.skill_evaluator.require_human_review
-        self._categories = config.workers.skill_evaluator.categories
+        self._llm_config_name = config.workers.skill_evaluator.get("llm", "")
+        self._quality_threshold = config.workers.skill_evaluator.get("quality_threshold", 0.7)
+        self._require_human_review = config.workers.skill_evaluator.get("require_human_review", False)
+        self._categories = config.workers.skill_evaluator.get("categories", [])
         self._config_pending = True
 
     def _on_initialize(self, config: LibrarianConfig) -> None:
