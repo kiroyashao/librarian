@@ -3,8 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from langchain_openai import ChatOpenAI
-
+from langchain.chat_models import init_chat_model
+from langchain_core.language_models.chat_models import BaseChatModel
 from src.config.configurable import Configurable
 from src.config.schema import LibrarianConfig, LLMConfig
 
@@ -48,7 +48,7 @@ class BaseWorker(Configurable, ABC):
         self._initialized = True
         self.mark_config_applied()
 
-    def _create_llm(self, llm_config: LLMConfig) -> ChatOpenAI:
+    def _create_llm(self, llm_config: LLMConfig) -> BaseChatModel:
         """Create a ChatOpenAI instance from an LLMConfig.
 
         Args:
@@ -56,13 +56,17 @@ class BaseWorker(Configurable, ABC):
 
         Returns:
             A configured ChatOpenAI instance.
+        Raises:
+            ValueError: If the model is not supported or the API key is invalid.
+            ImportError: If the required packages are not installed.
         """
-        kwargs: dict[str, Any] = {"model": llm_config.model or "gpt-4o-mini"}
-        if llm_config.api_key:
-            kwargs["api_key"] = llm_config.api_key
-        if llm_config.api_base:
-            kwargs["base_url"] = llm_config.api_base
-        return ChatOpenAI(**kwargs)
+        return init_chat_model(
+            model=llm_config.model,
+            api_key=llm_config.api_key or "xyz",
+            model_provider="openai",
+            base_url=llm_config.api_base,
+            temperature=0,
+        )
 
     @abstractmethod
     def _on_initialize(self, config: LibrarianConfig) -> None:
